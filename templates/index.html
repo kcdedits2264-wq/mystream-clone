@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>StreamAdda — Live Stream Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Syne', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              red:    '#ff3c3c',
+              orange: '#ff6b35',
+              glow:   '#ff3c3c33',
+            },
+            surface: {
+              900: '#0a0a0f',
+              800: '#111118',
+              700: '#18181f',
+              600: '#22222d',
+              500: '#2c2c3a',
+              400: '#3a3a4d',
+            },
+          },
+          boxShadow: {
+            glow:    '0 0 20px rgba(255, 60, 60, 0.35)',
+            'glow-sm': '0 0 8px rgba(255, 60, 60, 0.25)',
+            card:    '0 4px 32px rgba(0,0,0,0.6)',
+          },
+          animation: {
+            'pulse-red': 'pulse-red 2s ease-in-out infinite',
+            'slide-in':  'slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1)',
+            'fade-up':   'fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+          },
+          keyframes: {
+            'pulse-red': {
+              '0%, 100%': { opacity: 1, boxShadow: '0 0 6px rgba(255,60,60,0.7)' },
+              '50%':       { opacity: 0.6, boxShadow: '0 0 18px rgba(255,60,60,0.4)' },
+            },
+            'slide-in': {
+              from: { opacity: 0, transform: 'translateY(16px)' },
+              to:   { opacity: 1, transform: 'translateY(0)' },
+            },
+            'fade-up': {
+              from: { opacity: 0, transform: 'translateY(8px)' },
+              to:   { opacity: 1, transform: 'translateY(0)' },
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+
+    :root {
+      --red: #ff3c3c;
+      --orange: #ff6b35;
+      --surface-900: #0a0a0f;
+      --surface-800: #111118;
+      --surface-700: #18181f;
+      --surface-600: #22222d;
+      --surface-500: #2c2c3a;
+    }
+
+    html, body {
+      background-color: var(--surface-900);
+      color: #e2e2f0;
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Scanline overlay for that broadcast feel */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.04) 2px,
+        rgba(0, 0, 0, 0.04) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* Noise texture */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 9998;
+      opacity: 0.6;
+    }
+
+    /* Grid background */
+    .grid-bg {
+      background-image:
+        linear-gradient(rgba(255,60,60,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,60,60,0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    /* Input styles */
+    .field {
+      background: var(--surface-600);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px;
+      color: #e2e2f0;
+      font-family: 'Syne', sans-serif;
+      font-size: 0.875rem;
+      padding: 0.625rem 0.875rem;
+      width: 100%;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      outline: none;
+    }
+    .field:focus {
+      border-color: rgba(255, 60, 60, 0.6);
+      box-shadow: 0 0 0 3px rgba(255, 60, 60, 0.12);
+    }
+    .field::placeholder { color: rgba(255,255,255,0.25); }
+    select.field option { background: var(--surface-700); }
+
+    /* Terminal log */
+    .log-terminal {
+      background: #05050a;
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      line-height: 1.6;
+      color: #a0ffa0;
+      padding: 0.75rem;
+      height: 180px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      word-break: break-all;
+      scroll-behavior: smooth;
+    }
+    .log-terminal::-webkit-scrollbar { width: 4px; }
+    .log-terminal::-webkit-scrollbar-track { background: transparent; }
+    .log-terminal::-webkit-scrollbar-thumb { background: rgba(255,60,60,0.4); border-radius: 4px; }
+
+    /* Status badge */
+    .badge-online {
+      background: rgba(34, 197, 94, 0.12);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      animation: pulse-red 2s infinite;
+      --tw-shadow-color: rgba(34,197,94,0.4);
+    }
+    .badge-offline {
+      background: rgba(255, 60, 60, 0.08);
+      color: #ff6060;
+      border: 1px solid rgba(255,60,60,0.2);
+    }
+    .badge-starting {
+      background: rgba(251, 191, 36, 0.1);
+      color: #fbbf24;
+      border: 1px solid rgba(251, 191, 36, 0.3);
+    }
+
+    /* Dot indicator */
+    .dot-online  { background: #4ade80; box-shadow: 0 0 8px #4ade80; animation: pulse-green 2s infinite; }
+    .dot-offline { background: #ff6060; box-shadow: 0 0 4px rgba(255,60,60,0.4); }
+    .dot-starting { background: #fbbf24; box-shadow: 0 0 8px rgba(251,191,36,0.5); animation: pulse-red 1.2s infinite; }
+
+    @keyframes pulse-green {
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px #4ade80; }
+      50%       { opacity: 0.6; box-shadow: 0 0 18px rgba(74,222,128,0.4); }
+    }
+
+    /* Card */
+    .stream-card {
+      background: var(--surface-800);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.5);
+      transition: border-color 0.3s;
+      animation: fade-up 0.4s cubic-bezier(0.16,1,0.3,1);
+    }
+    .stream-card.is-online {
+      border-color: rgba(74, 222, 128, 0.2);
+      box-shadow: 0 4px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(74,222,128,0.1) inset;
+    }
+    .stream-card.is-starting {
+      border-color: rgba(251, 191, 36, 0.25);
+    }
+
+    /* Btn */
+    .btn-start {
+      background: linear-gradient(135deg, #ff3c3c, #ff6b35);
+      color: white;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      border: none;
+      border-radius: 10px;
+      padding: 0.7rem 1.5rem;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
+      box-shadow: 0 4px 20px rgba(255,60,60,0.4);
+    }
+    .btn-start:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 6px 28px rgba(255,60,60,0.55); }
+    .btn-start:active:not(:disabled) { transform: translateY(0); }
+    .btn-start:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-stop {
+      background: rgba(255,60,60,0.1);
+      color: #ff6060;
+      border: 1px solid rgba(255,60,60,0.3);
+      font-family: 'Syne', sans-serif;
+      font-weight: 600;
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    .btn-stop:hover { background: rgba(255,60,60,0.2); box-shadow: 0 0 12px rgba(255,60,60,0.25); }
+
+    .btn-delete {
+      background: transparent;
+      color: rgba(255,255,255,0.3);
+      border: 1px solid rgba(255,255,255,0.1);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      border-radius: 6px;
+      padding: 0.35rem 0.6rem;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .btn-delete:hover { color: #ff6060; border-color: rgba(255,60,60,0.4); }
+
+    .btn-ghost {
+      background: var(--surface-600);
+      color: rgba(255,255,255,0.6);
+      border: 1px solid rgba(255,255,255,0.08);
+      font-family: 'Syne', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    .btn-ghost:hover { background: var(--surface-500); color: #e2e2f0; }
+
+    /* Toggle */
+    .toggle-wrap { position: relative; display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+    .toggle-input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      width: 40px; height: 22px;
+      background: var(--surface-500);
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .toggle-thumb {
+      position: absolute;
+      left: 3px; top: 50%; transform: translateY(-50%);
+      width: 16px; height: 16px;
+      background: white;
+      border-radius: 50%;
+      transition: left 0.2s, background 0.2s;
+    }
+    .toggle-input:checked ~ .toggle-track { background: linear-gradient(135deg, #ff3c3c, #ff6b35); }
+    .toggle-input:checked ~ .toggle-track .toggle-thumb { left: 21px; }
+
+    /* Uptime counter */
+    .uptime-counter { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; }
+
+    /* Section divider */
+    .section-rule { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 0; }
+
+    /* Tooltip */
+    [data-tip] { position: relative; }
+    [data-tip]::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%; transform: translateX(-50%);
+      background: var(--surface-500);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      color: #e2e2f0;
+      font-size: 0.7rem;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 4px 8px;
+      white-space: nowrap;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 100;
+    }
+    [data-tip]:hover::after { opacity: 1; }
+
+    /* Top bar live indicator */
+    .live-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(255,60,60,0.12);
+      border: 1px solid rgba(255,60,60,0.3);
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      color: #ff8080;
+    }
+    .live-dot {
+      width: 7px; height: 7px;
+      background: var(--red);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--red);
+      animation: pulse-green 1.5s infinite;
+    }
+
+    /* Health bar */
+    .health-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--surface-700);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* Scrollbar global */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+    /* Mobile safe area */
+    @supports (padding: env(safe-area-inset-bottom)) {
+      .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+    }
+
+    /* Collapsed section */
+    .collapsible-body { overflow: hidden; transition: max-height 0.35s cubic-bezier(0.16,1,0.3,1); }
+    .collapsible-body.collapsed { max-height: 0 !important; }
+
+    /* Toast */
+    #toast-container {
+      position: fixed; bottom: 1.5rem; right: 1rem;
+      z-index: 10000;
+      display: flex; flex-direction: column; gap: 0.5rem;
+      align-items: flex-end;
+    }
+    .toast {
+      background: var(--surface-600);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 0.7rem 1rem;
+      font-size: 0.8rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: #e2e2f0;
+      max-width: 280px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      animation: slide-in 0.35s cubic-bezier(0.16,1,0.3,1);
+    }
+    .toast.success { border-color: rgba(74,222,128,0.3); color: #86efac; }
+    .toast.error   { border-color: rgba(255,60,60,0.3); color: #fca5a5; }
+    .toast.info    { border-color: rgba(96,165,250,0.3); color: #93c5fd; }
+  </style>
+</head>
+<body class="grid-bg min-h-screen">
+
+  <!-- ── Toast Container ── -->
+  <div id="toast-container"></div>
+
+  <!-- ── Top Navigation ── -->
+  <nav class="sticky top-0 z-50 border-b border-white/5" style="background: rgba(10,10,15,0.88); backdrop-filter: blur(16px);">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <!-- Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+             style="background: linear-gradient(135deg,#ff3c3c,#ff6b35); box-shadow: 0 4px 16px rgba(255,60,60,0.4);">
+          <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="font-display font-800 text-white text-base leading-tight tracking-tight">StreamAdda</div>
+          <div class="text-xs font-mono" style="color:rgba(255,255,255,0.35); font-size:0.6rem;">BROADCAST CONTROL</div>
+        </div>
+      </div>
+
+      <!-- Right side controls -->
+      <div class="flex items-center gap-2">
+        <!-- Health indicator -->
+        <div id="health-status" class="health-pill hidden sm:flex">
+          <svg id="health-dot" class="w-2 h-2 text-gray-500" fill="currentColor" viewBox="0 0 8 8">
+            <circle cx="4" cy="4" r="4"/>
+          </svg>
+          <span id="health-text">checking...</span>
+        </div>
+
+        <!-- Active streams chip -->
+        <div id="live-chip" class="live-chip hidden">
+          <span class="live-dot"></span>
+          <span id="active-count">0</span> LIVE
+        </div>
+
+        <!-- Add stream button -->
+        <button onclick="openAddModal()" class="btn-start text-sm px-3 py-2 flex items-center gap-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
+          </svg>
+          <span class="hidden sm:inline">New Stream</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── Main Content ── -->
+  <main class="max-w-6xl mx-auto px-4 py-6 pb-20">
+
+    <!-- Hero / Empty State -->
+    <div id="empty-state" class="text-center py-20 hidden">
+      <div class="w-20 h-20 mx-auto mb-6 rounded-2xl flex items-center justify-center"
+           style="background:rgba(255,60,60,0.08); border:1px dashed rgba(255,60,60,0.25);">
+        <svg class="w-9 h-9" style="color:rgba(255,60,60,0.5);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+        </svg>
+      </div>
+      <h2 class="font-display font-bold text-xl text-white mb-2">No Streams Yet</h2>
+      <p class="text-sm mb-6" style="color:rgba(255,255,255,0.4); max-width:320px; margin-left:auto; margin-right:auto;">
+        Click <strong>New Stream</strong> to configure your first 24/7 broadcast slot.
+      </p>
+      <button onclick="openAddModal()" class="btn-start px-6 py-3">
+        Start Your First Stream
+      </button>
+    </div>
+
+    <!-- Streams Grid -->
+    <div id="streams-grid" class="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-2"></div>
+
+  </main>
+
+  <!-- ── Add / Edit Stream Modal ── -->
+  <div id="modal-overlay"
+       class="fixed inset-0 z-[200] flex items-end sm:items-center justify-center hidden"
+       style="background:rgba(0,0,0,0.7); backdrop-filter:blur(6px);"
+       onclick="closeModal(event)">
+    <div id="modal-box"
+         class="w-full sm:max-w-xl rounded-t-2xl sm:rounded-2xl overflow-y-auto safe-bottom"
+         style="background:var(--surface-800); border:1px solid rgba(255,255,255,0.08); max-height:92vh;"
+         onclick="event.stopPropagation()">
+
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between px-5 pt-5 pb-4 border-b border-white/5">
+        <h2 class="font-display font-bold text-lg text-white">Configure Stream Slot</h2>
+        <button onclick="closeModal()" class="w-8 h-8 rounded-full flex items-center justify-center"
+                style="background:var(--surface-600); color:rgba(255,255,255,0.5);" aria-label="Close">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="px-5 py-4 space-y-4">
+
+        <!-- Stream Name -->
+        <div>
+          <label class="block text-xs font-mono mb-1.5" style="color:rgba(255,255,255,0.5);">STREAM NAME / SLOT TITLE</label>
+          <input id="f-name" class="field" type="text" placeholder="e.g. Morning Chill Lofi 24/7" autocomplete="off" />
+        </div>
+
+        <!-- Video URL -->
+        <div>
+          <label class="block text-xs font-mono mb-1.5" style="color:rgba(255,255,255,0.5);">VIDEO SOURCE URL
+            <span class="ml-1 normal-case" style="color:rgba(255,255,255,0.3);">(Google Drive / Direct MP4)</span>
+          </label>
+          <input id="f-video-url" class="field" type="url"
+                 placeholder="https://drive.google.com/uc?export=download&id=FILE_ID" autocomplete="off"/>
+          <p class="mt-1.5 text-xs font-mono" style="color:rgba(255,255,255,0.28);">
+            GDrive: File → Share → Anyone with link → copy &amp; convert to direct link
+          </p>
+        </div>
+
+        <!-- Platform -->
+        <div>
+          <label class="block text-xs font-mono mb-1.5" style="color:rgba(255,255,255,0.5);">STREAMING PLATFORM</label>
+          <select id="f-platform" class="field" onchange="onPlatformChange()">
+            <option value="youtube">YouTube Live</option>
+            <option value="facebook">Facebook Live</option>
+            <option value="custom">Custom RTMP URL</option>
+          </select>
+        </div>
+
+        <!-- Stream Key -->
+        <div id="f-stream-key-wrap">
+          <label class="block text-xs font-mono mb-1.5" style="color:rgba(255,255,255,0.5);">STREAM KEY
+            <span style="color:rgba(255,255,255,0.3);">(kept locally, never stored on server)</span>
+          </label>
+          <input id="f-stream-key" class="field font-mono" type="password"
+                 placeholder="xxxx-xxxx-xxxx-xxxx-xxxx" autocomplete="off"/>
+        </div>
+
+        <!-- Custom RTMP -->
+        <div id="f-custom-rtmp-wrap" class="hidden">
+          <label class="block text-xs font-mono mb-1.5" style="color:rgba(255,255,255,0.5);">CUSTOM RTMP URL (full)</label>
+          <input id="f-custom-rtmp" class="field font-mono" type="url"
+                 placeholder="rtmp://your.server.com/live/stream-key" autocomplete="off"/>
+        </div>
+
+        <!-- Quality Settings -->
+        <div class="rounded-xl p-4 space-y-3" style="background:var(--surface-700); border:1px solid rgba(255,255,255,0.05);">
+          <div class="flex items-center justify-between cursor-pointer" onclick="toggleQuality()">
+            <span class="text-xs font-mono" style="color:rgba(255,255,255,0.5);">▸ QUALITY / BITRATE SETTINGS</span>
+            <svg id="quality-arrow" class="w-4 h-4 transition-transform" style="color:rgba(255,255,255,0.3);"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </div>
+          <div id="quality-body" class="collapsible-body" style="max-height:0;">
+            <div class="pt-3 grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-mono mb-1" style="color:rgba(255,255,255,0.4);">RESOLUTION</label>
+                <select id="f-resolution" class="field">
+                  <option value="1920x1080">1080p (1920×1080)</option>
+                  <option value="1280x720" selected>720p (1280×720)</option>
+                  <option value="854x480">480p (854×480)</option>
+                  <option value="640x360">360p (640×360)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-mono mb-1" style="color:rgba(255,255,255,0.4);">VIDEO BITRATE</label>
+                <select id="f-vbitrate" class="field">
+                  <option value="4500k">4500k (1080p)</option>
+                  <option value="2500k" selected>2500k (720p)</option>
+                  <option value="1200k">1200k (480p)</option>
+                  <option value="600k">600k (360p)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-mono mb-1" style="color:rgba(255,255,255,0.4);">AUDIO BITRATE</label>
+                <select id="f-abitrate" class="field">
+                  <option value="192k">192k (High)</option>
+                  <option value="128k" selected>128k (Standard)</option>
+                  <option value="96k">96k (Low)</option>
+                </select>
+              </div>
+              <div class="flex items-end pb-1">
+                <label class="toggle-wrap">
+                  <input type="checkbox" id="f-loop" class="toggle-input" checked />
+                  <span class="toggle-track relative">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                  <span class="text-xs font-mono" style="color:rgba(255,255,255,0.5);">LOOP ∞</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Start Button -->
+        <button id="modal-start-btn" class="btn-start w-full py-3 text-sm flex items-center justify-center gap-2"
+                onclick="submitStream()">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                  d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                  d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Start Streaming
+        </button>
+
+      </div><!-- /modal body -->
+    </div>
+  </div>
+
+  <!-- ── JavaScript ── -->
+  <script>
+  'use strict';
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const state = {
+    streams: {},          // id → {id, name, status, uptime, ...}
+    eventSources: {},     // id → EventSource
+    uptimeIntervals: {},  // id → setInterval
+  };
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    checkHealth();
+    fetchStreams();
+    setInterval(fetchStreams, 8000);   // poll every 8 s
+    setInterval(checkHealth, 30000);
+  });
+
+  // ── Health ─────────────────────────────────────────────────────────────────
+  async function checkHealth() {
+    try {
+      const r = await fetch('/api/health');
+      const d = await r.json();
+      const dot  = document.getElementById('health-dot');
+      const text = document.getElementById('health-text');
+      document.getElementById('health-status').classList.remove('hidden');
+
+      if (d.ffmpeg) {
+        dot.classList.remove('text-gray-500', 'text-red-400');
+        dot.classList.add('text-green-400');
+        text.textContent = 'FFmpeg OK';
+        text.style.color = '#86efac';
+      } else {
+        dot.classList.add('text-red-400');
+        text.textContent = 'FFmpeg missing';
+        text.style.color = '#fca5a5';
+      }
+    } catch { /* silent */ }
+  }
+
+  // ── Streams Fetch & Render ─────────────────────────────────────────────────
+  async function fetchStreams() {
+    try {
+      const r = await fetch('/api/streams');
+      const data = await r.json();
+      reconcileStreams(data);
+    } catch (e) {
+      console.warn('Fetch streams error:', e);
+    }
+  }
+
+  function reconcileStreams(fresh) {
+    // Update or add
+    for (const [id, info] of Object.entries(fresh)) {
+      const existing = state.streams[id];
+      state.streams[id] = info;
+      if (!existing) {
+        renderCard(info);
+        attachEventSource(id);
+      } else {
+        updateCard(info);
+      }
+    }
+    // Remove deleted
+    for (const id of Object.keys(state.streams)) {
+      if (!fresh[id]) {
+        removeCard(id);
+        delete state.streams[id];
+      }
+    }
+    // Empty state
+    const count = Object.keys(state.streams).length;
+    document.getElementById('empty-state').classList.toggle('hidden', count > 0);
+    document.getElementById('streams-grid').classList.toggle('hidden', count === 0);
+
+    // Live chip
+    const active = Object.values(state.streams).filter(s => s.status === 'online').length;
+    const chip = document.getElementById('live-chip');
+    if (active > 0) {
+      chip.classList.remove('hidden');
+      document.getElementById('active-count').textContent = active;
+    } else {
+      chip.classList.add('hidden');
+    }
+  }
+
+  // ── Card Rendering ─────────────────────────────────────────────────────────
+  function renderCard(info) {
+    const grid = document.getElementById('streams-grid');
+    const div = document.createElement('div');
+    div.id = `card-${info.id}`;
+    div.className = `stream-card ${info.status === 'online' ? 'is-online' : ''}`;
+    div.innerHTML = cardHTML(info);
+    grid.appendChild(div);
+    startUptimeTimer(info.id, info.status, info.uptime);
+  }
+
+  function updateCard(info) {
+    const card = document.getElementById(`card-${info.id}`);
+    if (!card) { renderCard(info); return; }
+
+    // Status badge
+    const badge = card.querySelector('.status-badge');
+    const dot   = card.querySelector('.status-dot');
+    if (badge && dot) {
+      badge.className = `status-badge inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium ${statusBadgeClass(info.status)}`;
+      badge.querySelector('.badge-text').textContent = info.status.toUpperCase();
+      dot.className = `status-dot w-2 h-2 rounded-full flex-shrink-0 ${dotClass(info.status)}`;
+    }
+
+    // Card border
+    card.className = `stream-card ${info.status === 'online' ? 'is-online' : info.status === 'starting' ? 'is-starting' : ''}`;
+
+    // Uptime
+    const uptimeEl = card.querySelector('.uptime-val');
+    if (uptimeEl && info.status !== 'online') { uptimeEl.textContent = '—'; }
+
+    // Buttons
+    const stopBtn  = card.querySelector('.stop-btn');
+    const startBtn = card.querySelector('.restart-btn');
+    if (stopBtn)  stopBtn.classList.toggle('hidden', info.status !== 'online');
+    if (startBtn) startBtn.classList.toggle('hidden', info.status === 'online');
+
+    // Update timer
+    startUptimeTimer(info.id, info.status, info.uptime);
+  }
+
+  function removeCard(id) {
+    clearInterval(state.uptimeIntervals[id]);
+    delete state.uptimeIntervals[id];
+    if (state.eventSources[id]) {
+      state.eventSources[id].close();
+      delete state.eventSources[id];
+    }
+    const card = document.getElementById(`card-${id}`);
+    if (card) card.remove();
+  }
+
+  function cardHTML(info) {
+    const isOnline = info.status === 'online';
+    return `
+      <div class="p-4 flex flex-col gap-0">
+        <!-- Card Header -->
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="font-display font-bold text-white text-sm leading-tight truncate">${escHtml(info.name)}</h3>
+              <span class="status-badge inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium ${statusBadgeClass(info.status)}">
+                <span class="status-dot w-2 h-2 rounded-full flex-shrink-0 ${dotClass(info.status)}"></span>
+                <span class="badge-text">${info.status.toUpperCase()}</span>
+              </span>
+            </div>
+            <div class="mt-1 text-xs font-mono truncate" style="color:rgba(255,255,255,0.3);" title="${escHtml(info.rtmp_url || '')}">
+              ${info.rtmp_url ? '⬡ ' + truncate(info.rtmp_url, 48) : ''}
+            </div>
+          </div>
+          <button onclick="deleteStream('${info.id}')" class="btn-delete flex-shrink-0" title="Remove slot">✕</button>
+        </div>
+
+        <!-- Meta Pills -->
+        <div class="flex flex-wrap gap-1.5 mb-3">
+          ${metaPill(info.resolution || '—')}
+          ${metaPill((info.video_bitrate || '—') + ' vid')}
+          ${metaPill((info.audio_bitrate || '—') + ' aud')}
+          ${metaPill(info.loop ? '∞ LOOP' : '1× PLAY')}
+        </div>
+
+        <hr class="section-rule mb-3"/>
+
+        <!-- Uptime -->
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-mono" style="color:rgba(255,255,255,0.35);">UPTIME</span>
+          <span class="uptime-counter uptime-val text-white">${isOnline ? formatUptime(info.uptime || 0) : '—'}</span>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex items-center gap-2 mb-3">
+          <button class="stop-btn btn-stop flex-1 flex items-center justify-center gap-1.5 text-sm ${isOnline ? '' : 'hidden'}"
+                  onclick="stopStream('${info.id}')">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+              <rect x="5" y="5" width="10" height="10" rx="1"/>
+            </svg>
+            Stop Stream
+          </button>
+          <button class="restart-btn btn-ghost flex-1 flex items-center justify-center gap-1.5 text-sm ${isOnline ? 'hidden' : ''}"
+                  onclick="restartStream('${info.id}')">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Re-configure
+          </button>
+          <button class="btn-ghost px-3 py-2" onclick="toggleLogs('${info.id}')" title="Show/hide logs">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Log Terminal -->
+        <div id="log-wrap-${info.id}" class="hidden">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-mono" style="color:rgba(255,255,255,0.3);">FFmpeg Output</span>
+            <button onclick="clearLogs('${info.id}')" class="text-xs font-mono px-2 py-0.5 rounded"
+                    style="color:rgba(255,255,255,0.25); background:var(--surface-600);">clear</button>
+          </div>
+          <div id="log-${info.id}" class="log-terminal">
+            <span style="color:rgba(255,255,255,0.25);">── Waiting for output... ──</span>
+          </div>
+        </div>
+
+      </div>
+    `;
+  }
+
+  function metaPill(text) {
+    return `<span class="px-2 py-0.5 rounded font-mono text-xs" style="background:var(--surface-600);color:rgba(255,255,255,0.4);">${escHtml(text)}</span>`;
+  }
+
+  function statusBadgeClass(status) {
+    if (status === 'online')   return 'badge-online';
+    if (status === 'starting') return 'badge-starting';
+    return 'badge-offline';
+  }
+
+  function dotClass(status) {
+    if (status === 'online')   return 'dot-online';
+    if (status === 'starting') return 'dot-starting';
+    return 'dot-offline';
+  }
+
+  // ── Uptime Timers ──────────────────────────────────────────────────────────
+  function startUptimeTimer(id, status, initialUptime) {
+    clearInterval(state.uptimeIntervals[id]);
+    if (status !== 'online') return;
+    let seconds = initialUptime || 0;
+    state.uptimeIntervals[id] = setInterval(() => {
+      seconds++;
+      const el = document.querySelector(`#card-${id} .uptime-val`);
+      if (el) el.textContent = formatUptime(seconds);
+    }, 1000);
+  }
+
+  function formatUptime(sec) {
+    if (sec < 60)   return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec/60)}m ${sec%60}s`;
+    const h = Math.floor(sec/3600);
+    const m = Math.floor((sec%3600)/60);
+    const s = sec % 60;
+    return `${h}h ${m}m ${s}s`;
+  }
+
+  // ── SSE (Log Streaming) ────────────────────────────────────────────────────
+  function attachEventSource(id) {
+    if (state.eventSources[id]) state.eventSources[id].close();
+    const es = new EventSource(`/api/streams/${id}/events`);
+    state.eventSources[id] = es;
+    es.onmessage = (evt) => {
+      const line = evt.data;
+      if (!line || line.trim() === '') return;
+      appendLog(id, line);
+    };
+    es.onerror = () => {
+      // SSE will auto-reconnect per the retry header
+    };
+  }
+
+  function appendLog(id, line) {
+    const el = document.getElementById(`log-${id}`);
+    if (!el) return;
+    // Remove placeholder
+    const placeholder = el.querySelector('span[style]');
+    if (placeholder) placeholder.remove();
+
+    const span = document.createElement('div');
+    span.textContent = line;
+    // Colorize error lines
+    if (/error|fail|invalid/i.test(line)) span.style.color = '#fca5a5';
+    else if (/warn/i.test(line))          span.style.color = '#fde68a';
+    else if (/frame=|fps=|bitrate=/i.test(line)) span.style.color = '#93c5fd';
+    el.appendChild(span);
+
+    // Keep max 200 lines in DOM
+    while (el.children.length > 200) el.removeChild(el.firstChild);
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function toggleLogs(id) {
+    const wrap = document.getElementById(`log-wrap-${id}`);
+    if (!wrap) return;
+    wrap.classList.toggle('hidden');
+  }
+
+  function clearLogs(id) {
+    const el = document.getElementById(`log-${id}`);
+    if (el) el.innerHTML = '<span style="color:rgba(255,255,255,0.25);">── Log cleared ──</span>';
+  }
+
+  // ── Stream Actions ─────────────────────────────────────────────────────────
+  async function stopStream(id) {
+    try {
+      const r = await fetch(`/api/streams/${id}/stop`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed to stop');
+      toast('Stream stopped', 'info');
+      fetchStreams();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  }
+
+  async function deleteStream(id) {
+    if (!confirm('Remove this stream slot?')) return;
+    try {
+      await fetch(`/api/streams/${id}`, { method: 'DELETE' });
+      removeCard(id);
+      delete state.streams[id];
+      const count = Object.keys(state.streams).length;
+      document.getElementById('empty-state').classList.toggle('hidden', count > 0);
+      document.getElementById('streams-grid').classList.toggle('hidden', count === 0);
+      toast('Slot removed', 'info');
+    } catch (e) {
+      toast('Delete failed', 'error');
+    }
+  }
+
+  function restartStream(id) {
+    // Open modal pre-filled — user adjusts and re-submits
+    openAddModal();
+  }
+
+  // ── Modal ──────────────────────────────────────────────────────────────────
+  function openAddModal() {
+    document.getElementById('modal-overlay').classList.remove('hidden');
+    document.getElementById('f-name').focus();
+  }
+
+  function closeModal(event) {
+    if (!event || event.target === document.getElementById('modal-overlay')) {
+      document.getElementById('modal-overlay').classList.add('hidden');
+      resetForm();
+    }
+  }
+
+  function resetForm() {
+    ['f-name','f-video-url','f-stream-key','f-custom-rtmp'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    document.getElementById('f-platform').value = 'youtube';
+    document.getElementById('f-resolution').value = '1280x720';
+    document.getElementById('f-vbitrate').value = '2500k';
+    document.getElementById('f-abitrate').value = '128k';
+    document.getElementById('f-loop').checked = true;
+    onPlatformChange();
+  }
+
+  function onPlatformChange() {
+    const platform = document.getElementById('f-platform').value;
+    const keyWrap  = document.getElementById('f-stream-key-wrap');
+    const rtmpWrap = document.getElementById('f-custom-rtmp-wrap');
+    if (platform === 'custom') {
+      keyWrap.classList.add('hidden');
+      rtmpWrap.classList.remove('hidden');
+    } else {
+      keyWrap.classList.remove('hidden');
+      rtmpWrap.classList.add('hidden');
+    }
+  }
+
+  let qualityOpen = false;
+  function toggleQuality() {
+    qualityOpen = !qualityOpen;
+    const body  = document.getElementById('quality-body');
+    const arrow = document.getElementById('quality-arrow');
+    if (qualityOpen) {
+      body.style.maxHeight = body.scrollHeight + 'px';
+      arrow.style.transform = 'rotate(180deg)';
+    } else {
+      body.style.maxHeight = '0';
+      arrow.style.transform = 'rotate(0deg)';
+    }
+  }
+
+  async function submitStream() {
+    const btn = document.getElementById('modal-start-btn');
+    const name      = document.getElementById('f-name').value.trim();
+    const videoUrl  = document.getElementById('f-video-url').value.trim();
+    const platform  = document.getElementById('f-platform').value;
+    const streamKey = document.getElementById('f-stream-key').value.trim();
+    const customRtmp= document.getElementById('f-custom-rtmp').value.trim();
+    const resolution= document.getElementById('f-resolution').value;
+    const vBitrate  = document.getElementById('f-vbitrate').value;
+    const aBitrate  = document.getElementById('f-abitrate').value;
+    const loop      = document.getElementById('f-loop').checked;
+
+    if (!videoUrl)  { toast('Video URL is required', 'error'); return; }
+    if (platform !== 'custom' && !streamKey) { toast('Stream key is required', 'error'); return; }
+    if (platform === 'custom' && !customRtmp) { toast('Custom RTMP URL is required', 'error'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+
+    try {
+      const r = await fetch('/api/streams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name || 'Stream Slot',
+          video_url: videoUrl,
+          platform,
+          stream_key: streamKey,
+          custom_rtmp: customRtmp,
+          resolution,
+          video_bitrate: vBitrate,
+          audio_bitrate: aBitrate,
+          loop,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed to start stream');
+
+      toast(`"${d.name}" is now LIVE!`, 'success');
+      closeModal();
+      fetchStreams();
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Start Streaming`;
+    }
+  }
+
+  // ── Toast ──────────────────────────────────────────────────────────────────
+  function toast(msg, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    container.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity 0.3s';
+      setTimeout(() => el.remove(), 300);
+    }, 4000);
+  }
+
+  // ── Utilities ──────────────────────────────────────────────────────────────
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function truncate(str, n) {
+    return str.length <= n ? str : str.slice(0, n) + '…';
+  }
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeModal();
+    if (e.key === 'n' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') {
+      openAddModal();
+    }
+  });
+  </script>
+</body>
+</html>
